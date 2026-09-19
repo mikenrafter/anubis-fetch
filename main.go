@@ -57,6 +57,7 @@ type options struct {
 	noCache   bool   // don't read/write the persistent cookie jar
 	cookie    string // browser-provided Cookie header; never persisted
 	json      bool   // emit a machine-readable response
+	challenge string // browser-provided Anubis challenge JSON
 }
 
 type fetchResult struct {
@@ -88,6 +89,7 @@ Flags:
   --no-browser      never use the browser; exit 3 if the solve can't apply
   --no-cache        don't read or write the persistent cookie jar
   --cookie STRING   browser-provided Cookie header for this request
+  --challenge JSON  browser-provided Anubis challenge JSON
   --json             emit base64 HTML and cookies as JSON
 `)
 }
@@ -132,6 +134,7 @@ func parseFlags() options {
 	flag.BoolVar(&o.noBrowser, "no-browser", false, "never use the browser; exit 3 on failure")
 	flag.BoolVar(&o.noCache, "no-cache", false, "don't read or write the cookie jar")
 	flag.StringVar(&o.cookie, "cookie", "", "browser-provided Cookie header for this request")
+	flag.StringVar(&o.challenge, "challenge", "", "browser-provided Anubis challenge JSON")
 	flag.BoolVar(&o.json, "json", false, "emit base64 HTML and cookies as JSON")
 	flag.Usage = usage
 	flag.Parse()

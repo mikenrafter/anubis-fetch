@@ -33,6 +33,40 @@ type challenge struct {
 	basePrefix string
 }
 
+// parseChallengeJSON accepts the challenge object supplied by the browser.
+// It uses the same shape as Anubis' embedded challenge script.
+func parseChallengeJSON(raw string) (*challenge, error) {
+	var data struct {
+		Challenge struct {
+			ID         string `json:"id"`
+			Method     string `json:"method"`
+			RandomData string `json:"randomData"`
+			Difficulty int    `json:"difficulty"`
+		} `json:"challenge"`
+		Rules struct {
+			Algorithm  string `json:"algorithm"`
+			Difficulty int    `json:"difficulty"`
+		} `json:"rules"`
+		Method     string `json:"method"`
+		RandomData string `json:"randomData"`
+		ID         string `json:"id"`
+		Difficulty int    `json:"difficulty"`
+	}
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return nil, err
+	}
+	c := &challenge{
+		method:     firstNonEmpty(data.Challenge.Method, firstNonEmpty(data.Method, data.Rules.Algorithm)),
+		difficulty: firstNonZero(data.Challenge.Difficulty, firstNonZero(data.Difficulty, data.Rules.Difficulty)),
+		randomData: firstNonEmpty(data.Challenge.RandomData, data.RandomData),
+		id:         firstNonEmpty(data.Challenge.ID, data.ID),
+	}
+	if c.method == "" || c.difficulty <= 0 || c.randomData == "" || c.id == "" {
+		return nil, fmt.Errorf("incomplete challenge JSON")
+	}
+	return c, nil
+}
+
 // isAnubis reports whether html is an Anubis interstitial (challenge or deny)
 // rather than real content.
 func isAnubis(html string) bool {
@@ -128,22 +162,35 @@ func fetchViaHTTP(o options) (result fetchResult, escalate bool) {
 		client.SetCommonHeader("User-Agent", o.ua)
 	}
 
-	resp, err := client.R().Get(o.url)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "anubis-fetch: http error: %v; escalating\n", err)
-		return fetchResult{}, true
-	}
-	html := resp.String()
-
-	// Not walled, or a stored cookie let us straight through.
-	if !isAnubis(html) {
-		if !o.noCache {
-			saveCookies(jar, u)
+	var c *challenge
+	var origin *url.URL
+	if o.challenge != "" {
+		var challengeErr error
+		c, challengeErr = parseChallengeJSON(o.challenge)
+		if challengeErr != nil {
+			fmt.Fprintf(os.Stderr, "anubis-fetch: invalid browser challenge: %v; escalating\n", challengeErr)
+			return fetchResult{}, true
 		}
-		return fetchResult{html: html, cookies: jar.Cookies(resp.Response.Request.URL)}, false
+		origin = u
+	} else {
+		resp, err := client.R().Get(o.url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "anubis-fetch: http error: %v; escalating\n", err)
+			return fetchResult{}, true
+		}
+		html := resp.String()
+
+		// Not walled, or a stored cookie let us straight through.
+		if !isAnubis(html) {
+			if !o.noCache {
+				saveCookies(jar, u)
+			}
+			return fetchResult{html: html, cookies: jar.Cookies(resp.Response.Request.URL)}, false
+		}
+		c = parseChallenge(html)
+		origin = resp.Response.Request.URL
 	}
 
-	c := parseChallenge(html)
 	switch {
 	case c == nil:
 		fmt.Fprintln(os.Stderr, "anubis-fetch: unparseable/deny challenge; escalating to browser")
@@ -157,7 +204,6 @@ func fetchViaHTTP(o options) (result fetchResult, escalate bool) {
 	}
 
 	// Assets and submissions belong to the final challenge URL after redirects.
-	origin := resp.Response.Request.URL
 	start := time.Now()
 	var nonce uint64
 	var response string
