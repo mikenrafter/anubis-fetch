@@ -49,9 +49,10 @@ type options struct {
 	timeout   time.Duration
 	ua        string
 	text      bool
-	browser   bool // skip the solver, go straight to the browser
-	noBrowser bool // never use the browser; exit escalateExit if solving fails
-	noCache   bool // don't read/write the persistent cookie jar
+	browser   bool   // skip the solver, go straight to the browser
+	noBrowser bool   // never use the browser; exit escalateExit if solving fails
+	noCache   bool   // don't read/write the persistent cookie jar
+	cookie    string // browser-provided Cookie header; never persisted
 }
 
 func usage() {
@@ -67,6 +68,7 @@ Flags:
   --browser         skip the in-process solver; use the headless browser
   --no-browser      never use the browser; exit 3 if the solve can't apply
   --no-cache        don't read or write the persistent cookie jar
+  --cookie STRING   browser-provided Cookie header for this request
 `)
 }
 
@@ -109,6 +111,7 @@ func parseFlags() options {
 	flag.BoolVar(&o.browser, "browser", false, "skip the solver; use the browser")
 	flag.BoolVar(&o.noBrowser, "no-browser", false, "never use the browser; exit 3 on failure")
 	flag.BoolVar(&o.noCache, "no-cache", false, "don't read or write the cookie jar")
+	flag.StringVar(&o.cookie, "cookie", "", "browser-provided Cookie header for this request")
 	flag.Usage = usage
 	flag.Parse()
 

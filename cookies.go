@@ -7,9 +7,29 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/net/publicsuffix"
 )
+
+// parseCookieHeader converts the browser's Cookie request header into the
+// minimal cookie representation needed by the jar. Cookie values may contain
+// '='; only the first '=' separates the name from the value.
+func parseCookieHeader(header string) []*http.Cookie {
+	parts := strings.Split(header, ";")
+	cookies := make([]*http.Cookie, 0, len(parts))
+	for _, part := range parts {
+		name, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || strings.TrimSpace(name) == "" {
+			continue
+		}
+		cookies = append(cookies, &http.Cookie{
+			Name:  strings.TrimSpace(name),
+			Value: strings.TrimSpace(value),
+		})
+	}
+	return cookies
+}
 
 // Cookies (chiefly Anubis' `techaro.lol-anubis-auth` JWT) are persisted per
 // host so a later run is let straight through, exactly like a browser revisit.

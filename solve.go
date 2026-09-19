@@ -119,6 +119,10 @@ func fetchViaHTTP(o options) (html string, escalate bool) {
 	if !o.noCache {
 		loadCookies(jar, u)
 	}
+	if o.cookie != "" {
+		// Browser state wins over the local cache for this request.
+		jar.SetCookies(u, parseCookieHeader(o.cookie))
+	}
 	client := req.C().ImpersonateChrome().SetTimeout(o.timeout).SetCookieJar(jar)
 	if o.ua != "" {
 		client.SetCommonHeader("User-Agent", o.ua)
