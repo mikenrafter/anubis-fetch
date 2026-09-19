@@ -20,8 +20,11 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -53,6 +56,22 @@ type options struct {
 	noBrowser bool   // never use the browser; exit escalateExit if solving fails
 	noCache   bool   // don't read/write the persistent cookie jar
 	cookie    string // browser-provided Cookie header; never persisted
+	json      bool   // emit a machine-readable response
+}
+
+type fetchResult struct {
+	html    string
+	cookies []*http.Cookie
+}
+
+type jsonCookie struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type jsonResult struct {
+	BodyBase64 string       `json:"body_base64"`
+	Cookies    []jsonCookie `json:"cookies,omitempty"`
 }
 
 func usage() {
@@ -69,6 +88,7 @@ Flags:
   --no-browser      never use the browser; exit 3 if the solve can't apply
   --no-cache        don't read or write the persistent cookie jar
   --cookie STRING   browser-provided Cookie header for this request
+  --json             emit base64 HTML and cookies as JSON
 `)
 }
 
@@ -80,9 +100,9 @@ func run() int {
 	o := parseFlags()
 
 	if !o.browser {
-		html, escalate := fetchViaHTTP(o)
+		result, escalate := fetchViaHTTP(o)
 		if !escalate {
-			output(html, o)
+			outputResult(result, o)
 			return 0
 		}
 		if o.noBrowser {
@@ -98,7 +118,7 @@ func run() int {
 			return 1
 		}
 	}
-	output(html, o)
+	outputResult(fetchResult{html: html}, o)
 	return 0
 }
 
@@ -112,6 +132,7 @@ func parseFlags() options {
 	flag.BoolVar(&o.noBrowser, "no-browser", false, "never use the browser; exit 3 on failure")
 	flag.BoolVar(&o.noCache, "no-cache", false, "don't read or write the cookie jar")
 	flag.StringVar(&o.cookie, "cookie", "", "browser-provided Cookie header for this request")
+	flag.BoolVar(&o.json, "json", false, "emit base64 HTML and cookies as JSON")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -122,6 +143,24 @@ func parseFlags() options {
 	o.url = flag.Arg(0)
 	o.timeout = time.Duration(timeoutMs) * time.Millisecond
 	return o
+}
+
+func outputResult(result fetchResult, o options) {
+	if o.json {
+		cookies := make([]jsonCookie, 0, len(result.cookies))
+		for _, cookie := range result.cookies {
+			cookies = append(cookies, jsonCookie{Name: cookie.Name, Value: cookie.Value})
+		}
+		encoded := jsonResult{
+			BodyBase64: base64.StdEncoding.EncodeToString([]byte(result.html)),
+			Cookies:    cookies,
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(encoded); err != nil {
+			fmt.Fprintf(os.Stderr, "anubis-fetch: JSON output error: %v\n", err)
+		}
+		return
+	}
+	output(result.html, o)
 }
 
 func output(html string, o options) {

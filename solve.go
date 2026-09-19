@@ -108,11 +108,11 @@ func solvePoW(randomData string, difficulty int) (int, string) {
 
 // fetchViaHTTP tries the browserless path. It returns the page HTML, or
 // escalate=true if the caller should fall back to a browser.
-func fetchViaHTTP(o options) (html string, escalate bool) {
+func fetchViaHTTP(o options) (result fetchResult, escalate bool) {
 	u, err := url.Parse(o.url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "anubis-fetch: bad url: %v\n", err)
-		return "", true
+		return fetchResult{}, true
 	}
 
 	jar := newJar()
@@ -131,29 +131,29 @@ func fetchViaHTTP(o options) (html string, escalate bool) {
 	resp, err := client.R().Get(o.url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "anubis-fetch: http error: %v; escalating\n", err)
-		return "", true
+		return fetchResult{}, true
 	}
-	html = resp.String()
+	html := resp.String()
 
 	// Not walled, or a stored cookie let us straight through.
 	if !isAnubis(html) {
 		if !o.noCache {
 			saveCookies(jar, u)
 		}
-		return html, false
+		return fetchResult{html: html, cookies: jar.Cookies(resp.Response.Request.URL)}, false
 	}
 
 	c := parseChallenge(html)
 	switch {
 	case c == nil:
 		fmt.Fprintln(os.Stderr, "anubis-fetch: unparseable/deny challenge; escalating to browser")
-		return "", true
+		return fetchResult{}, true
 	case !legacyMethods[c.method] && !isWASMMethod(c.method):
 		fmt.Fprintf(os.Stderr, "anubis-fetch: challenge method %q not solvable in-process; escalating\n", c.method)
-		return "", true
+		return fetchResult{}, true
 	case legacyMethods[c.method] && c.difficulty > maxDifficulty:
 		fmt.Fprintf(os.Stderr, "anubis-fetch: difficulty %d too high for in-process solve; escalating\n", c.difficulty)
-		return "", true
+		return fetchResult{}, true
 	}
 
 	// Assets and submissions belong to the final challenge URL after redirects.
@@ -167,12 +167,12 @@ func fetchViaHTTP(o options) (html string, escalate bool) {
 		code, err := fetchWASM(ctx, client, origin, c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "anubis-fetch: %v; escalating\n", err)
-			return "", true
+			return fetchResult{}, true
 		}
 		n, digest, err := solveWASM(ctx, code, c.randomData, c.difficulty)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "anubis-fetch: %v; escalating\n", err)
-			return "", true
+			return fetchResult{}, true
 		}
 		nonce, response = uint64(n), digest
 	} else {
@@ -196,17 +196,17 @@ func fetchViaHTTP(o options) (html string, escalate bool) {
 	resp2, err := client.R().Get(pass.String())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "anubis-fetch: pass-challenge error: %v; escalating\n", err)
-		return "", true
+		return fetchResult{}, true
 	}
 	html2 := resp2.String()
 	if isAnubis(html2) {
 		fmt.Fprintln(os.Stderr, "anubis-fetch: solution rejected; escalating to browser")
-		return "", true
+		return fetchResult{}, true
 	}
 	if !o.noCache {
 		saveCookies(jar, u) // now holds the Anubis auth cookie
 	}
-	return html2, false
+	return fetchResult{html: html2, cookies: jar.Cookies(resp2.Response.Request.URL)}, false
 }
 
 func firstNonEmpty(a, b string) string {
